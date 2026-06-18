@@ -634,12 +634,12 @@ async function api(action, payload) {
   document.getElementById('loading-sc').style.display = 'none';
   document.getElementById('scan-page').style.display  = 'block';
 
-  if(!SCAN_DATA){
-    document.getElementById('scan-body').innerHTML = '<div style="padding:40px;text-align:center;color:#adb5bd"><i class="fas fa-exclamation-circle fa-3x mb-3 d-block"></i><h4 style="color:#fff">Data tidak ditemukan</h4></div>';
-    return;
-  }
-
-  renderScanPage(SCAN_DATA);
+  // Data dimuat async via loadScanData() — tampilkan spinner dulu
+  document.getElementById('scan-body').innerHTML =
+    '<div class="text-center py-5">'
+    +'<i class="fas fa-spinner fa-spin fa-2x" style="color:#5dade2"></i>'
+    +'<p style="color:#adb5bd;margin-top:12px;font-size:.9rem">Memuat data aset...</p>'
+    +'</div>';
 })();
 
 // ── Helpers scan ──────────────────────────────────────────────────
@@ -1332,7 +1332,7 @@ function loadScanData(){
   document.getElementById('scan-body').innerHTML='<div class="text-center py-5"><i class="fas fa-spinner fa-spin fa-2x text-muted"></i><br><small class="text-muted mt-2 d-block">Memuat data aset…</small></div>';
   api(action,{id:_SCAN_ID}).then(data=>{
     SCAN_DATA=data;
-    initScanView(data);
+    renderScanPage(data);
   }).catch(e=>{
     document.getElementById('scan-body').innerHTML='<div class="alert alert-danger m-4">Gagal memuat data: '+e.message+'</div>';
   });
