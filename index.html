@@ -196,6 +196,7 @@ h1,h2,h3,h4,h5,h6,.brand{font-family:'Rajdhani',sans-serif;}
 // ║  WAJIB DIISI: URL GAS Web App Anda setelah di-deploy        ║
 // ║  Contoh: https://script.google.com/macros/s/AKfy.../exec    ║
 // ╚══════════════════════════════════════════════════════════════╝
+/* === HSE-MONITOR v3.1 — GitHub Pages Build === */
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbw87yrRpRKwR7AAwL1qKAz_J3S6qI7UAL4rGLtDoTHOL1-pOm1dPG7MhOs8D8a0f4eJ5w/exec';
 
 // Baca parameter QR scan dari URL (menggantikan template injection GAS)
@@ -648,6 +649,10 @@ function todayISO(){return new Date().toISOString().substring(0,10);}
 
 // FIX 1: render penuh semua parameter inspeksi APAR (9 item + catatan per item)
 function renderScanPage(data){
+  // Routing berdasarkan _scanType
+  if(data&&data._scanType==='equip'){renderScanPageEquip(data);return;}
+  if(data&&data._scanType==='p3k') {renderScanPageP3k(data);return;}
+  // Default: APAR
   const body = document.getElementById('scan-body');
   if(!data||data._notFound){
     body.innerHTML=`<div class="scan-card" style="margin-top:20px;text-align:center"><i class="fas fa-exclamation-triangle fa-3x" style="color:var(--red);margin-bottom:16px;display:block"></i><h4 style="color:var(--red)">APAR Tidak Ditemukan</h4><p style="color:#6c757d">ID: ${data?._id||'?'}</p><p>QR code tidak valid atau APAR telah dihapus.</p></div>`;
@@ -776,7 +781,7 @@ function updateNgSummary(){
   el.innerHTML='<b>⚠️ '+ngItems.length+' item NG:</b> '+ngItems.map(i=>'<br>• '+i.label).join('');
 }
 
-function submitScan(asetId, asetNama, lokasiLabel){
+function submitScan(asetId, asetNama, lokasiLabel, tipeForm){
   const inspektor=document.getElementById('scan-inspektor').value.trim();
   const tgl=document.getElementById('scan-tgl').value;
   const catatan=document.getElementById('scan-catatan').value;
@@ -794,7 +799,7 @@ function submitScan(asetId, asetNama, lokasiLabel){
     return{id:item.id,label:item.label,nilai:item.nilai,catatan:noteEl?noteEl.value:''};
   });
 
-  const data={Tipe_Form:'APAR',Aset_ID:asetId,Aset_Nama:asetNama,Lokasi_Label:lokasiLabel,
+  const data={Tipe_Form:tipeForm||'APAR',Aset_ID:asetId,Aset_Nama:asetNama,Lokasi_Label:lokasiLabel,
     Tgl_Inspeksi:tgl,Inspektor:inspektor,Checklist_JSON:JSON.stringify(clItems),Catatan:catatan};
 
   api('saveInspeksiFromScan',data).then(res=>{
@@ -820,7 +825,7 @@ function submitScan(asetId, asetNama, lokasiLabel){
                   <span class="info-val" style="color:${ng>0?'#dc3545':'#28a745'}">${ng} item</span></div>
               </div>
               ${ng>0?`<div class="alert alert-warning mt-3 text-start" style="font-size:.82rem;"><i class="fas fa-wrench me-2"></i><b>${ng} item perlu perhatian.</b> Segera laporkan kepada petugas HSE untuk tindak lanjut perbaikan.</div>`:''}
-              <button class="btn btn-navy mt-3 w-100" onclick="location.reload()"><i class="fas fa-redo me-2"></i>Inspeksi APAR Lain</button>
+              <button class="btn btn-navy mt-3 w-100" onclick="location.reload()"><i class="fas fa-redo me-2"></i>Inspeksi ${tipeForm||'APAR'} Lain</button>
             </div>
           </div>`;
       } else {
@@ -941,18 +946,42 @@ function closeSb(){document.getElementById('sidebar').classList.remove('open');d
 // ================================================================
 //  QR CODE
 // ================================================================
-function openQrModal(aparData){
-  A.qrAparData=aparData;
-  const now=new Date(),exp=aparData.Tgl_Expired?new Date(aparData.Tgl_Expired):null;
-  const ms=exp?exp-now:Infinity,sc=ms<0?'bs-exp':ms<30*86400000?'bs-near':'bs-ok',sl=ms<0?'EXPIRED':ms<30*86400000?'Segera Exp':'Aktif';
-  document.getElementById('qr-apar-info').innerHTML=`
-    <div class="field"><span><b>ID APAR</b></span><span><code>${aparData.ID}</code></span></div>
-    <div class="field"><span>Jenis</span><span>${aparData.Jenis} ${aparData.Brand||''}</span></div>
-    <div class="field"><span>Kapasitas</span><span>${aparData.Kapasitas||'—'}</span></div>
-    <div class="field"><span>Lokasi</span><span>${aparData.Lokasi_Label}</span></div>
-    <div class="field"><span>Expired</span><span>${fd(aparData.Tgl_Expired)} <span class="bs ${sc}" style="margin-left:4px">${sl}</span></span></div>`;
-  // GitHub Pages: bangun URL QR dari alamat halaman saat ini
-  const qrUrl=location.origin+location.pathname+'?scan=apar&id='+encodeURIComponent(aparData.ID);
+function openQrModal(type, data){
+  // Backward compat: openQrModal(aparObj) — tanpa type
+  if(typeof type==='object'&&data===undefined){data=type;type='apar';}
+  A.qrData={type:type, ...data};
+
+  const labels={apar:'APAR',equip:'Peralatan',p3k:'Kotak P3K'};
+  const useTxt={apar:'form inspeksi APAR',equip:'form inspeksi Peralatan',p3k:'form penggunaan P3K'};
+  document.querySelector('#qrModal .modal-title').innerHTML=
+    '<i class="fas fa-qrcode me-2"></i>QR Code '+(labels[type]||type);
+  document.querySelector('#qrModal .alert-info').innerHTML=
+    '<i class="fas fa-info-circle me-2"></i>Scan QR untuk membuka '+(useTxt[type]||'')+' langsung di HP.';
+
+  let infoHtml='';
+  if(type==='apar'){
+    const now=new Date(),exp=data.Tgl_Expired?new Date(data.Tgl_Expired):null;
+    const ms=exp?exp-now:Infinity,sc=ms<0?'bs-exp':ms<30*86400000?'bs-near':'bs-ok',sl=ms<0?'EXPIRED':ms<30*86400000?'Segera Exp':'Aktif';
+    infoHtml=`
+      <div class="field"><span><b>ID APAR</b></span><span><code>${data.ID}</code></span></div>
+      <div class="field"><span>Jenis</span><span>${data.Jenis} ${data.Brand||''}</span></div>
+      <div class="field"><span>Kapasitas</span><span>${data.Kapasitas||'—'}</span></div>
+      <div class="field"><span>Lokasi</span><span>${data.Lokasi_Label}</span></div>
+      <div class="field"><span>Expired</span><span>${fd(data.Tgl_Expired)} <span class="bs ${sc}" style="margin-left:4px">${sl}</span></span></div>`;
+  }else if(type==='equip'){
+    infoHtml=`
+      <div class="field"><span><b>ID Peralatan</b></span><span><code>${data.ID}</code></span></div>
+      <div class="field"><span>Tipe</span><span>${data.Tipe||'—'}</span></div>
+      <div class="field"><span>Nama</span><span>${data.Nama||'—'}</span></div>
+      <div class="field"><span>Lokasi</span><span>${data.Lokasi_Label||'—'}</span></div>`;
+  }else if(type==='p3k'){
+    infoHtml=`
+      <div class="field"><span><b>ID Kotak P3K</b></span><span><code>${data.ID}</code></span></div>
+      <div class="field"><span>Lokasi</span><span>${data.Lokasi_Label||'—'}</span></div>`;
+  }
+  document.getElementById('qr-apar-info').innerHTML=infoHtml;
+
+  const qrUrl=location.origin+location.pathname+'?scan='+type+'&id='+encodeURIComponent(data.ID);
   document.getElementById('qr-url-box').textContent=qrUrl;
   document.getElementById('qr-render').innerHTML='';
   try{new QRCode(document.getElementById('qr-render'),{text:qrUrl,width:220,height:220,colorDark:'#1a3a5c',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.H});}
@@ -960,8 +989,21 @@ function openQrModal(aparData){
   toast('QR Code siap!','success');
   new bootstrap.Modal(document.getElementById('qrModal')).show();
 }
-function downloadQR(){const c=document.querySelector('#qr-render canvas');if(!c){toast('QR belum siap','warning');return;}const l=document.createElement('a');l.download='QR_APAR_'+(A.qrAparData?.ID||'export')+'.png';l.href=c.toDataURL('image/png');l.click();}
-function printQR(){const c=document.querySelector('#qr-render canvas');if(!c){toast('QR belum siap','warning');return;}const d=A.qrAparData;document.getElementById('print-apar-detail').innerHTML=`ID: ${d.ID} | ${d.Jenis} ${d.Brand||''} ${d.Kapasitas||''}<br>Lokasi: ${d.Lokasi_Label} | Expired: ${fd(d.Tgl_Expired)}`;const pC=document.getElementById('print-qr-canvas');pC.innerHTML='';const img=document.createElement('img');img.src=c.toDataURL('image/png');img.style.width='200px';pC.appendChild(img);document.getElementById('print-qr-area').style.display='block';window.print();setTimeout(()=>{document.getElementById('print-qr-area').style.display='none';},1000);}
+function downloadQR(){const c=document.querySelector('#qr-render canvas');if(!c){toast('QR belum siap','warning');return;}const l=document.createElement('a');const t=(A.qrData?.type||'APAR').toUpperCase();l.download='QR_'+t+'_'+(A.qrData?.ID||'export')+'.png';l.href=c.toDataURL('image/png');l.click();}
+function printQR(){
+  const c=document.querySelector('#qr-render canvas');if(!c){toast('QR belum siap','warning');return;}
+  const d=A.qrData||{};
+  let det='';
+  if(d.type==='apar')   det=`ID: ${d.ID} | ${d.Jenis||''} ${d.Brand||''} ${d.Kapasitas||''}<br>Lokasi: ${d.Lokasi_Label||'—'} | Expired: ${fd(d.Tgl_Expired)}`;
+  else if(d.type==='equip') det=`ID: ${d.ID} | ${d.Tipe||''}: ${d.Nama||''}<br>Lokasi: ${d.Lokasi_Label||'—'}`;
+  else if(d.type==='p3k')   det=`ID: ${d.ID} | Kotak P3K<br>Lokasi: ${d.Lokasi_Label||'—'}`;
+  document.getElementById('print-apar-detail').innerHTML=det;
+  const pC=document.getElementById('print-qr-canvas');pC.innerHTML='';
+  const img=document.createElement('img');img.src=c.toDataURL('image/png');img.style.width='200px';pC.appendChild(img);
+  document.getElementById('print-qr-area').style.display='block';
+  window.print();
+  setTimeout(()=>{document.getElementById('print-qr-area').style.display='none';},1000);
+}
 
 // ================================================================
 //  DASHBOARD
@@ -1003,7 +1045,7 @@ function renderApar(list){
     return `<tr><td><small class="text-muted">${a.ID}</small></td><td><b>${a.Jenis}</b></td><td>${a.Brand||'—'}</td><td>${a.Kapasitas||'—'}</td>
       <td>${a.Lokasi_Label}</td><td>${fd(a.Tgl_Isi)}</td><td>${fd(a.Tgl_Expired)}</td>
       <td><span class="bs ${c}">${l}</span></td>
-      <td><button class="btn btn-xs btn-outline-dark" onclick='openQrModal(${JSON.stringify(a)})' title="Generate QR Code"><i class="fas fa-qrcode"></i></button></td>
+      <td><button class="btn btn-xs btn-outline-dark" onclick='openQrModal("apar",${JSON.stringify(a)})' title="QR Inspeksi APAR"><i class="fas fa-qrcode"></i></button></td>
       <td>${ce?`<button class="btn btn-xs btn-outline-primary me-1" onclick='editApar(${JSON.stringify(a)})'><i class="fas fa-edit fa-xs"></i></button><button class="btn btn-xs btn-outline-danger" onclick="delApar('${a.ID}')"><i class="fas fa-trash fa-xs"></i></button>`:'—'}</td></tr>`;
   }).join('');
 }
@@ -1044,7 +1086,7 @@ function renderEquip(list){
   const now=new Date(),am=(parseInt(A.cfg.ALERT_DAYS)||30)*86400000;const tb=document.getElementById('equip-tbody');
   if(!list.length){tb.innerHTML='<tr><td colspan="8" class="text-center text-muted py-4">Belum ada peralatan</td></tr>';return;}
   tb.innerHTML=list.map(e=>{const ms=e.Tgl_Expired?(new Date(e.Tgl_Expired)-now):Infinity;const c=ms<0?'bs-exp':ms<am?'bs-near':'bs-ok',l=ms<0?'EXPIRED':ms<am?'Segera Exp':'Aktif';const ce=A.me.Role!=='operator';
-    return `<tr><td><small class="text-muted">${e.ID}</small></td><td><span class="badge" style="background:${equipColor(e.Tipe)};font-size:.72rem">${equipEmoji(e.Tipe)} ${e.Tipe}</span></td><td><b>${e.Nama}</b></td><td>${e.Lokasi_Label}</td><td>${fd(e.Tgl_Pasang)}</td><td>${e.Tgl_Expired?fd(e.Tgl_Expired):'—'}</td><td><span class="bs ${c}">${l}</span></td><td>${ce?`<button class="btn btn-xs btn-outline-primary me-1" onclick='editEquip(${JSON.stringify(e)})'><i class="fas fa-edit fa-xs"></i></button><button class="btn btn-xs btn-outline-danger" onclick="delEquip('${e.ID}')"><i class="fas fa-trash fa-xs"></i></button>`:'—'}</td></tr>`;}).join('');
+    return `<tr><td><small class="text-muted">${e.ID}</small></td><td><span class="badge" style="background:${equipColor(e.Tipe)};font-size:.72rem">${equipEmoji(e.Tipe)} ${e.Tipe}</span></td><td><b>${e.Nama}</b></td><td>${e.Lokasi_Label}</td><td>${fd(e.Tgl_Pasang)}</td><td>${e.Tgl_Expired?fd(e.Tgl_Expired):'—'}</td><td><span class="bs ${c}">${l}</span></td><td>${ce?`<button class="btn btn-xs btn-outline-primary me-1" onclick='editEquip(${JSON.stringify(e)})'><i class="fas fa-edit fa-xs"></i></button><button class="btn btn-xs btn-outline-danger" onclick="delEquip('${e.ID}')"><i class="fas fa-trash fa-xs"></i></button>`:''}<button class="btn btn-xs btn-outline-dark ms-1" onclick='openQrModal("equip",${JSON.stringify(e)})' title="QR Inspeksi Peralatan"><i class="fas fa-qrcode fa-xs"></i></button></td></tr>`;}).join('');
 }
 function openEquipModal(data){
   document.getElementById('equip-mtitle').textContent=data?'Edit Peralatan':'Tambah Peralatan';
@@ -1069,7 +1111,7 @@ function delEquip(id){if(!confirm('Hapus?'))return;api('deleteEquip',{id}).then(
 //  P3K
 // ================================================================
 function loadP3kLok(){api('getP3kLokasiList').then(l=>{A.p3kLok=l;renderP3kLok(l);}).catch(e=>toast('Error: '+e.message,'danger'));}
-function renderP3kLok(list){const el=document.getElementById('p3k-lok-list');if(!list.length){el.innerHTML='<div class="empty-st"><i class="fas fa-map-pin"></i>Belum ada lokasi P3K</div>';return;}el.innerHTML=list.map(l=>`<div class="ai" style="border-color:var(--blue);cursor:pointer;margin-bottom:6px;" onclick="selP3k('${l.ID}')"><i class="fas fa-kit-medical" style="color:var(--blue)"></i><div style="flex:1"><b style="font-size:.88rem">${l.Lokasi_Label}</b><div style="font-size:.72rem;color:#adb5bd">📍 ${l.Lat&&+l.Lat!==0?`${(+l.Lat).toFixed(5)}, ${(+l.Lng).toFixed(5)}`:'No GPS'}</div></div>${A.me.Role!=='operator'?`<div class="d-flex gap-1"><button class="btn btn-xs btn-outline-secondary" onclick="event.stopPropagation();editP3kLok(${JSON.stringify(l).replace(/"/g,'&quot;')})"><i class="fas fa-edit fa-xs"></i></button><button class="btn btn-xs btn-outline-danger" onclick="event.stopPropagation();delP3kLok('${l.ID}')"><i class="fas fa-trash fa-xs"></i></button></div>`:''}</div>`).join('');}
+function renderP3kLok(list){const el=document.getElementById('p3k-lok-list');if(!list.length){el.innerHTML='<div class="empty-st"><i class="fas fa-map-pin"></i>Belum ada lokasi P3K</div>';return;}el.innerHTML=list.map(l=>`<div class="ai" style="border-color:var(--blue);cursor:pointer;margin-bottom:6px;" onclick="selP3k('${l.ID}')"><i class="fas fa-kit-medical" style="color:var(--blue)"></i><div style="flex:1"><b style="font-size:.88rem">${l.Lokasi_Label}</b><div style="font-size:.72rem;color:#adb5bd">📍 ${l.Lat&&+l.Lat!==0?`${(+l.Lat).toFixed(5)}, ${(+l.Lng).toFixed(5)}`:'No GPS'}</div></div><div class="d-flex gap-1 align-items-center"><button class="btn btn-xs btn-outline-dark" onclick="event.stopPropagation();openQrModal('p3k',${JSON.stringify(l).replace(/"/g,'&quot;')})" title="QR Penggunaan P3K"><i class="fas fa-qrcode fa-xs"></i></button>${A.me.Role!=='operator'?`<button class="btn btn-xs btn-outline-secondary" onclick="event.stopPropagation();editP3kLok(${JSON.stringify(l).replace(/"/g,'&quot;')})"><i class="fas fa-edit fa-xs"></i></button><button class="btn btn-xs btn-outline-danger" onclick="event.stopPropagation();delP3kLok('${l.ID}')"><i class="fas fa-trash fa-xs"></i></button>`:''}</div></div>`).join('');}
 function openP3kLokModal(data){document.getElementById('p3klok-mtitle').textContent=data?'Edit Lokasi':'Tambah Lokasi P3K';document.getElementById('p3klok-id').value=data?.ID||'';document.getElementById('p3klok-lab').value=data?.Lokasi_Label||'';clearFCoord('p3klok');new bootstrap.Modal(document.getElementById('p3kLokModal')).show();document.getElementById('p3kLokModal').addEventListener('shown.bs.modal',()=>{const lat=data?.Lat?parseFloat(data.Lat):null,lng=data?.Lng?parseFloat(data.Lng):null;initFMap('p3klok',lat,lng);if(lat&&lng)fillFCoord('p3klok',lat,lng);},{once:true});}
 function editP3kLok(d){openP3kLokModal(d);}
 function saveP3kLok(){const data={ID:$v('p3klok-id')||null,Lokasi_Label:$v('p3klok-lab'),Lat:$v('p3klok-lat'),Lng:$v('p3klok-lng'),By:A.me?.Username||'system'};if(!data.Lokasi_Label){toast('Nama lokasi wajib!','warning');return;}api('saveP3kLokasi',data).then(r=>{if(r&&r.ok===false){toast('Error: '+r.msg,'danger');return;}bootstrap.Modal.getInstance(document.getElementById('p3kLokModal')).hide();toast('Disimpan!');loadP3kLok();loadDashboard();A.mainData=null;}).catch(e=>toast('Error: '+e.message,'danger'));}
@@ -1328,13 +1370,263 @@ function loadScanData(){
     document.getElementById('scan-body').innerHTML='<div class="alert alert-danger m-4">Parameter scan tidak valid.</div>';
     return;
   }
-  const action = _SCAN_TYPE==='apar' ? 'getScanApar' : 'getScanP3k';
+  const action = _SCAN_TYPE==='apar' ? 'getScanApar'
+               : _SCAN_TYPE==='equip' ? 'getScanEquip'
+               : _SCAN_TYPE==='p3k'   ? 'getScanP3k'
+               : null;
+  if(!action){
+    document.getElementById('scan-body').innerHTML='<div class="alert alert-danger m-4">Tipe scan tidak dikenal: '+_SCAN_TYPE+'</div>';
+    return;
+  }
   document.getElementById('scan-body').innerHTML='<div class="text-center py-5"><i class="fas fa-spinner fa-spin fa-2x text-muted"></i><br><small class="text-muted mt-2 d-block">Memuat data aset…</small></div>';
   api(action,{id:_SCAN_ID}).then(data=>{
     SCAN_DATA=data;
     renderScanPage(data);
   }).catch(e=>{
-    document.getElementById('scan-body').innerHTML='<div class="alert alert-danger m-4">Gagal memuat data: '+e.message+'</div>';
+    console.error('loadScanData error:', e);
+    document.getElementById('scan-body').innerHTML='<div class="alert alert-danger m-4">Gagal memuat data: '+e.message+'<br><small>'+e.stack+'</small></div>';
+  });
+}
+
+// ================================================================
+//  QR SCAN — EQUIPMENT (Form Inspeksi)
+// ================================================================
+function renderScanPageEquip(data){
+  const body=document.getElementById('scan-body');
+  if(!data||data._notFound){
+    body.innerHTML=`<div class="scan-card" style="margin-top:20px;text-align:center">
+      <i class="fas fa-exclamation-triangle fa-3x" style="color:var(--red);margin-bottom:16px;display:block"></i>
+      <h4 style="color:var(--red)">Peralatan Tidak Ditemukan</h4>
+      <p style="color:#6c757d">ID: ${data?._id||'?'}</p>
+      <p>QR code tidak valid atau peralatan telah dihapus.</p></div>`;
+    return;
+  }
+  const now=new Date(),exp=data.Tgl_Expired?new Date(data.Tgl_Expired):null;
+  const ms=exp?exp-now:Infinity;
+  const sCls=ms<0?'status-exp':ms<30*86400000?'status-near':'status-ok';
+  const sTxt=ms<0?'⚠️ KEDALUWARSA':ms<30*86400000?'⏰ Segera Expired':'✅ Aktif';
+
+  let lastHtml='';
+  if(data._lastInspeksi){
+    const li=data._lastInspeksi;
+    const lc=li.Status_Akhir==='LULUS'?'status-ok':li.Status_Akhir==='PERLU PERBAIKAN'?'status-near':'status-exp';
+    const prevCl=(li.Checklist||[]);
+    const okCnt=prevCl.filter(i=>i.nilai==='OK').length;
+    const ngCnt=prevCl.filter(i=>i.nilai==='NG').length;
+    lastHtml=`<div class="last-insp-box">
+      <b>📋 Inspeksi Terakhir</b><br>
+      <span>Tanggal: ${fd(li.Tgl_Inspeksi)} | Inspektor: ${li.Inspektor}</span><br>
+      <span>Hasil: <span class="status-chip ${lc}" style="padding:2px 8px;font-size:.72rem">${li.Status_Akhir}</span>
+      &nbsp;|&nbsp; <span class="prev-ok">✅ ${okCnt} OK</span> &nbsp;
+      <span class="prev-ng">❌ ${ngCnt} NG</span></span>
+    </div>`;
+  }
+
+  const cl=data._checklistDef||[];
+  window._scanCk=cl.map(item=>({id:item.id,label:item.label,nilai:'OK',catatan:''}));
+  const clHtml=cl.map((item,idx)=>`
+    <div class="ck-scan ck-ok" id="cks-${idx}">
+      <div class="ck-scan-label"><b>${idx+1}.</b> ${item.label}</div>
+      <div class="ck-btn-row">
+        <div class="ck-btn sel-ok" id="ckb-ok-${idx}" onclick="setScanCk(${idx},'OK')">✅ OK</div>
+        <div class="ck-btn" id="ckb-ng-${idx}" onclick="setScanCk(${idx},'NG')">❌ NG</div>
+        <div class="ck-btn" id="ckb-na-${idx}" onclick="setScanCk(${idx},'NA')">N/A</div>
+      </div>
+      <input class="ck-note" id="ckn-${idx}" placeholder="Catatan item ini (opsional)..." oninput="window._scanCk[${idx}].catatan=this.value">
+    </div>`).join('');
+
+  const tipeForm=data.Tipe==='Hydrant'?'HYDRANT':'PERALATAN';
+  body.innerHTML=`
+    <div class="scan-card">
+      <div class="id-badge"><i class="fas fa-tools me-1"></i>${data.ID||'?'}</div>
+      <h5><i class="fas fa-info-circle"></i>Identitas Peralatan</h5>
+      <div class="info-row"><span class="info-label">Jenis / Tipe</span><span class="info-val">${data.Tipe||'—'}</span></div>
+      <div class="info-row"><span class="info-label">Nama Peralatan</span><span class="info-val">${data.Nama||'—'}</span></div>
+      <div class="info-row"><span class="info-label">Lokasi</span><span class="info-val">${data.Lokasi_Label||'—'}</span></div>
+      <div class="info-row"><span class="info-label">Tgl Pemasangan</span><span class="info-val">${fd(data.Tgl_Pasang)}</span></div>
+      ${data.Tgl_Expired?`<div class="info-row"><span class="info-label">Tgl Expired</span><span class="info-val">${fd(data.Tgl_Expired)}</span></div>`:''}
+      <div class="info-row"><span class="info-label">Status</span><span class="info-val"><span class="status-chip ${sCls}">${sTxt}</span></span></div>
+      ${data.Catatan?`<div class="info-row"><span class="info-label">Catatan</span><span class="info-val" style="color:#6c757d;font-size:.82rem">${data.Catatan}</span></div>`:''}
+    </div>
+
+    <div class="scan-card">
+      <h5><i class="fas fa-clipboard-check"></i>Form Inspeksi Rutin — ${data.Tipe||'Peralatan'}</h5>
+      ${lastHtml}
+      <div class="row g-2 mb-3">
+        <div class="col-8">
+          <label class="form-label">Nama Inspektor *</label>
+          <input type="text" class="form-control" id="scan-inspektor" placeholder="Nama lengkap Anda" style="font-size:.9rem;">
+        </div>
+        <div class="col-4">
+          <label class="form-label">Tanggal</label>
+          <input type="date" class="form-control" id="scan-tgl" value="${todayISO()}" style="font-size:.9rem;">
+        </div>
+      </div>
+      <div class="alert alert-light py-2 mb-3" style="font-size:.8rem;border:1px solid #dee2e6;">
+        <b>Petunjuk:</b> Ketuk <span style="background:#28a745;color:#fff;padding:1px 7px;border-radius:4px;font-size:.75rem">✅ OK</span> jika kondisi baik,
+        <span style="background:#dc3545;color:#fff;padding:1px 7px;border-radius:4px;font-size:.75rem">❌ NG</span> jika ada masalah.
+      </div>
+      <div id="scan-cl">${clHtml}</div>
+      <div id="scan-ng-summary" style="display:none;" class="alert alert-warning py-2 mb-3"></div>
+      <div class="mb-4">
+        <label class="form-label">Catatan Umum / Temuan</label>
+        <textarea class="form-control" id="scan-catatan" rows="3" placeholder="Temuan, rekomendasi, tindak lanjut..." style="font-size:.86rem;"></textarea>
+      </div>
+      <button class="btn btn-navy w-100 py-3" id="scan-submit"
+        style="font-size:1rem;font-family:'Rajdhani',sans-serif;font-weight:700;letter-spacing:.5px;"
+        onclick="submitScan('${data.ID}','${(data.Nama||'').replace(/'/g,"\\'")}','${(data.Lokasi_Label||'').replace(/'/g,"\\'")}','${tipeForm}')">
+        <i class="fas fa-paper-plane me-2"></i>KIRIM HASIL INSPEKSI
+      </button>
+    </div>`;
+}
+
+// ================================================================
+//  QR SCAN — KOTAK P3K (Catat Pemakaian oleh Karyawan)
+// ================================================================
+function renderScanPageP3k(data){
+  const body=document.getElementById('scan-body');
+  if(!data||data._notFound){
+    body.innerHTML=`<div class="scan-card" style="margin-top:20px;text-align:center">
+      <i class="fas fa-exclamation-triangle fa-3x" style="color:var(--red);margin-bottom:16px;display:block"></i>
+      <h4 style="color:var(--red)">Kotak P3K Tidak Ditemukan</h4>
+      <p style="color:#6c757d">ID: ${data?._id||'?'}</p></div>`;
+    return;
+  }
+
+  const items=data._items||[];
+  const itemsHtml=items.length===0
+    ?'<div class="alert alert-info py-2">Belum ada item dalam kotak P3K ini.</div>'
+    :items.map((item,idx)=>`
+      <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid #f0f3f7;">
+        <div style="flex:1;">
+          <div style="font-weight:600;font-size:.88rem">${item.Nama_Item||'—'}</div>
+          <div style="font-size:.75rem;color:#adb5bd">
+            Stok: <b style="color:${(item.Stok_Saat_Ini||0)>0?'#28a745':'#dc3545'}">${item.Stok_Saat_Ini||0}</b> ${item.Satuan||''}
+            ${item.Tgl_Expired?` | Exp: ${fd(item.Tgl_Expired)}`:''}
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:4px;flex-shrink:0;">
+          <button class="btn btn-sm btn-outline-secondary px-2" onclick="p3kQty(${idx},-1)" style="font-size:1.1rem;line-height:1;padding-top:1px">−</button>
+          <input type="number" id="p3k-qty-${idx}" value="0" min="0" max="${item.Stok_Saat_Ini||0}"
+            data-item-id="${item.ID||''}"
+            data-item-nama="${(item.Nama_Item||'').replace(/"/g,'&quot;')}"
+            data-satuan="${item.Satuan||''}"
+            data-p3kid="${data.ID||''}"
+            data-lok="${(data.Lokasi_Label||'').replace(/"/g,'&quot;')}"
+            style="width:50px;text-align:center;border:1px solid #dee2e6;border-radius:6px;padding:4px;font-size:.9rem;font-weight:700;">
+          <button class="btn btn-sm btn-outline-secondary px-2" onclick="p3kQty(${idx},1)" style="font-size:1.1rem;line-height:1;padding-top:1px">+</button>
+        </div>
+      </div>`).join('');
+
+  body.innerHTML=`
+    <div class="scan-card">
+      <div class="id-badge"><i class="fas fa-kit-medical me-1"></i>${data.ID||'?'}</div>
+      <h5><i class="fas fa-box-open"></i>Kotak P3K — ${data.Lokasi_Label||'—'}</h5>
+      <div class="info-row"><span class="info-label">Lokasi</span><span class="info-val">${data.Lokasi_Label||'—'}</span></div>
+      <div class="info-row"><span class="info-label">Jumlah Jenis Item</span><span class="info-val">${items.length} jenis</span></div>
+    </div>
+
+    <div class="scan-card">
+      <h5><i class="fas fa-hand-holding-medical"></i>Catat Penggunaan P3K</h5>
+      <div class="alert alert-info py-2 mb-3" style="font-size:.82rem;">
+        <i class="fas fa-info-circle me-2"></i>
+        Tekan <b>+</b> pada item yang digunakan, isi nama Anda, lalu tekan <b>CATAT PENGGUNAAN</b>.
+        Stok akan otomatis dikurangi.
+      </div>
+
+      <div id="p3k-items-list">${itemsHtml}</div>
+
+      <div class="mt-3 pt-2">
+        <label class="form-label">Nama Pemakai *</label>
+        <input type="text" class="form-control mb-2" id="p3k-pemakai"
+          placeholder="Nama lengkap Anda" style="font-size:.9rem;">
+        <label class="form-label">Keperluan / Keterangan</label>
+        <input type="text" class="form-control" id="p3k-keperluan"
+          placeholder="Contoh: Luka gores, Sakit kepala, Luka bakar..." style="font-size:.9rem;">
+      </div>
+
+      <button class="btn btn-success w-100 py-3 mt-3" id="scan-submit"
+        style="font-size:1rem;font-family:'Rajdhani',sans-serif;font-weight:700;letter-spacing:.5px;"
+        onclick="submitP3kUsage('${data.ID}','${(data.Lokasi_Label||'').replace(/'/g,"\\'")}')">
+        <i class="fas fa-check-circle me-2"></i>CATAT PENGGUNAAN P3K
+      </button>
+    </div>`;
+}
+
+/** Tombol +/- jumlah pemakaian item P3K */
+function p3kQty(idx, delta){
+  const inp=document.getElementById('p3k-qty-'+idx);
+  if(!inp)return;
+  const max=parseInt(inp.max)||999;
+  inp.value=Math.max(0,Math.min(max,parseInt(inp.value||0)+delta));
+}
+
+/** Submit pemakaian P3K dari QR scan — tanpa login */
+function submitP3kUsage(p3kId, lokasiLabel){
+  const pemakai=document.getElementById('p3k-pemakai').value.trim();
+  const keperluan=document.getElementById('p3k-keperluan').value.trim();
+  if(!pemakai){
+    document.getElementById('p3k-pemakai').style.borderColor='red';
+    document.getElementById('p3k-pemakai').placeholder='⚠️ Nama pemakai wajib diisi!';
+    document.getElementById('p3k-pemakai').focus();
+    return;
+  }
+  const usedItems=[];
+  document.querySelectorAll('[id^="p3k-qty-"]').forEach(inp=>{
+    const qty=parseInt(inp.value)||0;
+    if(qty>0){
+      usedItems.push({
+        P3K_ID:   inp.dataset.p3kid,
+        Item_ID:  inp.dataset.itemId,
+        Nama_Item:inp.dataset.itemNama,
+        Lokasi_Label:inp.dataset.lok,
+        Satuan:   inp.dataset.satuan,
+        Jumlah:   qty,
+        Tgl_Pemakaian: todayISO(),
+        Keterangan: keperluan,
+        NamaPemakai: pemakai
+      });
+    }
+  });
+  if(usedItems.length===0){
+    alert('Pilih minimal 1 item yang digunakan.\nTekan tombol + untuk menambah jumlah pemakaian.');
+    return;
+  }
+  const btn=document.getElementById('scan-submit');
+  btn.disabled=true;
+  btn.innerHTML='<i class="fas fa-spinner fa-spin me-2"></i>Mencatat...';
+
+  api('recordPemakaianScan',{NamaPemakai:pemakai,items:usedItems}).then(res=>{
+    if(res.ok){
+      const itemList=usedItems.map(i=>`<li>${i.Nama_Item} — ${i.Jumlah} ${i.Satuan||''}</li>`).join('');
+      document.getElementById('scan-body').innerHTML=`
+        <div class="scan-card" style="margin-top:20px">
+          <div class="scan-result">
+            <span class="result-icon"><i class="fas fa-check-circle" style="color:#28a745"></i></span>
+            <h4 style="color:#28a745">Penggunaan Tercatat!</h4>
+            <p style="color:#6c757d;margin-bottom:16px">Penggunaan P3K berhasil dicatat dalam sistem HSE</p>
+            <div class="summary-box">
+              <div class="info-row"><span class="info-label">Lokasi P3K</span><span class="info-val">${lokasiLabel}</span></div>
+              <div class="info-row"><span class="info-label">Nama Pemakai</span><span class="info-val">${pemakai}</span></div>
+              <div class="info-row"><span class="info-label">Keperluan</span><span class="info-val">${keperluan||'—'}</span></div>
+              <div class="info-row" style="border:none"><span class="info-label">Item digunakan</span>
+                <span class="info-val"><ul style="margin:0;padding-left:16px;font-size:.85rem">${itemList}</ul></span>
+              </div>
+            </div>
+            <button class="btn btn-success mt-3 w-100" onclick="location.reload()">
+              <i class="fas fa-redo me-2"></i>Catat Penggunaan Lain
+            </button>
+          </div>
+        </div>`;
+    }else{
+      btn.disabled=false;
+      btn.innerHTML='<i class="fas fa-check-circle me-2"></i>CATAT PENGGUNAAN P3K';
+      alert('Gagal mencatat: '+(res.msg||'Error tidak diketahui'));
+    }
+  }).catch(e=>{
+    btn.disabled=false;
+    btn.innerHTML='<i class="fas fa-check-circle me-2"></i>CATAT PENGGUNAAN P3K';
+    alert('Error: '+e.message);
   });
 }
 
